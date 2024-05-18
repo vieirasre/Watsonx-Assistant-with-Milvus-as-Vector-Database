@@ -1,10 +1,15 @@
-FROM python:3.10
+FROM python:3.11.2-slim-bullseye
 
 WORKDIR /code
 
 COPY ./requirements.txt /code/requirements.txt
 
-RUN pip install --no-cache-dir --upgrade -r /code/requirements.txt
+RUN \
+    pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu && \
+    pip install --no-cache-dir --upgrade -r /code/requirements.txt && \
+    python3 -c 'from datasets import load_dataset;load_dataset("ruslanmv/ai-medical-chatbot");from towhee import ops;ops.text_embedding.dpr(model_name="facebook/dpr-ctx_encoder-single-nq-base")'
+
 
 # Set up a new user named "user" with user ID 1000
 RUN useradd -m -u 1000 user
