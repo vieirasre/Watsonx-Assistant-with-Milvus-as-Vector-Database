@@ -4,29 +4,21 @@ import pandas as pd
 import re
 from dotenv import load_dotenv
 import os
-from ibm_watson_machine_learning.foundation_models.utils.enums import ModelTypes
-from ibm_watson_machine_learning.metanames import GenTextParamsMetaNames as GenParams
-from ibm_watson_machine_learning.foundation_models.utils.enums import DecodingMethods
-from langchain.llms import WatsonxLLM
-from langchain.embeddings import SentenceTransformerEmbeddings
-from langchain.embeddings.base import Embeddings
-from langchain.vectorstores.milvus import Milvus
-from langchain.embeddings import HuggingFaceEmbeddings  # Not used in this example
-from dotenv import load_dotenv
-import os
 from pymilvus import Collection, utility
 from pymilvus import connections, FieldSchema, CollectionSchema, DataType, Collection, utility
 from towhee import pipe, ops
 import numpy as np
+from towhee.datacollection import DataCollection
+from typing import List
+
+from ibm_watson_machine_learning.foundation_models.utils.enums import ModelTypes
+from ibm_watson_machine_learning.metanames import GenTextParamsMetaNames as GenParams
+from ibm_watson_machine_learning.foundation_models.utils.enums import DecodingMethods
+from langchain.llms import WatsonxLLM
 #import langchain.chains as lc
 from langchain_core.retrievers import BaseRetriever
 from langchain_core.callbacks import CallbackManagerForRetrieverRun
 from langchain_core.documents import Document
-from pymilvus import Collection, utility
-from towhee import pipe, ops
-import numpy as np
-from towhee.datacollection import DataCollection
-from typing import List
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
 from langchain.schema.runnable import RunnablePassthrough
@@ -60,6 +52,41 @@ df['question'] = df['question'].str.slice(0, max_length)
 #To use the dataset to get answers, let's first define the dictionary:
 #- `id_answer`: a dictionary of id and corresponding answer
 id_answer = df.set_index('id')['answer'].to_dict()
+
+def create_milvus_collection(collection_name, dim):
+    if utility.has_collection(collection_name):
+        utility.drop_collection(collection_name)
+    fields = [
+    FieldSchema(name='id', dtype=DataType.VARCHAR, descrition='ids', max_length=500, is_primary=True, auto_id=False),
+    FieldSchema(name='embedding', dtype=DataType.FLOAT_VECTOR, descrition='embedding vectors', dim=dim)
+    ]
+    schema = CollectionSchema(fields=fields, description='reverse image search')
+    collection = Collection(name=collection_name, schema=schema)
+    # create IVF_FLAT index for collection.
+    index_params = {
+        'metric_type':'L2',
+        'index_type':"IVF_FLAT",
+        'params':{"nlist":2048}
+    }
+    collection.create_index(field_name="embedding", index_params=index_params)
+    return collection
+
+COLLECTION_NAME='qa_medical'
+load_dotenv()
+host_milvus = os.environ.get("REMOTE_SERVER", '127.0.0.1')
+connections.connect(host=host_milvus, port='19530')
+
+insert_pipe = (
+    pipe.input('id', 'question', 'answer')
+        .map('question', 'vec', ops.text_embedding.dpr(model_name='facebook/dpr-ctx_encoder-single-nq-base'))
+        .map('vec', 'vec', lambda x: x / np.linalg.norm(x, axis=0))
+        .map(('id', 'vec'), 'insert_status', ops.ann_insert.milvus_client(host=host_milvus, port='19530', collection_name='question_answer'))
+        .output()
+)
+
+#collection = create_milvus_collection(COLLECTION_NAME, 768)
+# for index, row in df.iterrows():
+#     insert_pipe(str(row['id']), row['question'], row['answer'])
 
 ## Step 2 WatsonX connection
 
@@ -97,12 +124,6 @@ watsonx_granite = WatsonxLLM(
 
 
 ## Step 3 Milvus connection
-
-COLLECTION_NAME='qa_medical'
-load_dotenv()
-host_milvus = os.environ.get("REMOTE_SERVER", '127.0.0.1')
-connections.connect(host=host_milvus, port='19530')
-
 
 collection = Collection(COLLECTION_NAME)      
 collection.load(replica_number=1)
@@ -156,7 +177,9 @@ rag_chain = (
 )
 
 prompt = "I have started to get lots of acne on my face, particularly on my forehead what can I do"
-
+prompt = "Can a painless tooth be extracted since it has a hole in it" 
+# dataset['train'][14]
+# {'Description': 'Q. Can a painless tooth be extracted since it has a hole in it?', 'Patient': 'Hello doctor,Can I pull out hard teeth out no pain because I got a hole in my teeth? Whenever I use to eat something, it got stuck in it and caused severe pain. Kindly give me some advice about pulling it out without any pain.', 'Doctor': 'Hello. I had gone through your question, and I can understand your concern. If the pain occurs only when you eat food and it gets stuck into it, it is reversible pulpitis. For that, you do not need to get it extracted. You need to get it filled, and it will cost you less than that of pulling (extraction). Second, you will save your tooth too. My suggestion is to get dental filling done as soon as possible. If you want to get it removed, you need to visit a doctor (dentist), and there will be no pain because during extraction local anesthesia is given.'}
 if print_full_prompt:
     # Get the retrieved context
     context = retriever.get_relevant_documents(prompt)
@@ -201,7 +224,7 @@ def chat():
     return jsonify(response_data), 200
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8080, debug=True)
+    app.run(host='0.0.0.0', port=8080, debug=False)
 
 
 
