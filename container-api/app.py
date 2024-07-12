@@ -84,9 +84,9 @@ insert_pipe = (
         .output()
 )
 
-#collection = create_milvus_collection(COLLECTION_NAME, 768)
-# for index, row in df.iterrows():
-#     insert_pipe(str(row['id']), row['question'], row['answer'])
+collection = create_milvus_collection(COLLECTION_NAME, 768)
+ for index, row in df.iterrows():
+     insert_pipe(str(row['id']), row['question'], row['answer'])
 
 ## Step 2 WatsonX connection
 
