@@ -76,6 +76,7 @@ load_dotenv()
 host_milvus = os.environ.get("REMOTE_SERVER", '127.0.0.1')
 connections.connect(host=host_milvus, port='19530')
 
+#aqui aparece 'question_answer'
 insert_pipe = (
     pipe.input('id', 'question', 'answer')
         .map('question', 'vec', ops.text_embedding.dpr(model_name='facebook/dpr-ctx_encoder-single-nq-base'))
